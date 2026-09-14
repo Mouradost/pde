@@ -1,0 +1,175 @@
+networks:
+  my_network:
+    driver: bridge
+    name: pde_network
+    ipam:
+      config:
+        - subnet: 10.0.0.0/16
+          ip_range: 10.0.0.0/16
+          gateway: 10.0.0.1
+
+services:
+  traefik:
+    container_name: traefik
+    image: traefik:latest
+    restart: unless-stopped
+    tty: true
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      TRAEFIK_DASHBOARD_CREDENTIALS: ${TRAEFIK_DASHBOARD_CREDENTIALS}
+      DUCKDNS_TOKEN: ${DUCKDNS_TOKEN}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - $DATADIR/traefik/traefik.yaml:/traefik.yaml:ro
+      - $DATADIR/traefik/config:/etc/traefik:ro
+      - $DATADIR/traefik/logs:/var/log/traefik:rw
+      # - ./certs:/var/traefik/certs:rw
+    ports:
+      - 80:80
+      - 443:443
+      # - 8000:8080
+    networks:
+      my_network:
+        ipv4_address: 10.0.0.2
+
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      WEBPASSWORD: ${PASSWORD}
+      DNSSEC: true
+      WEBTHEME: default-dark
+    ports:
+      - 53:53/tcp
+      - 53:53/udp
+      # - "67:67/udp" # Only required if you are using Pi-hole as your DHCP server
+      # - 13002:80/tcp
+      # - 13003:443/tcp
+    volumes:
+      - ${DATADIR}/pihole:/etc/pihole:rw
+      - ${DATADIR}/pihole/dnsmasq.d:/etc/dnsmasq.d:rw
+    # cap_add:
+    #   - NET_ADMIN # Required if you are using Pi-hole as your DHCP server, else not needed
+    networks:
+      my_network:
+        ipv4_address: 10.0.0.3
+
+  authentik-server:
+    container_name: authentik-server
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION}
+    restart: unless-stopped
+    command: server
+    # user: ${PUID}:${PGID}
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      # AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__USER: ${USERNAME}
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PASSWORD}
+    volumes:
+      - ${DATADIR}/authentik/media:/media
+      - ${DATADIR}/authentik/custom-templates:/templates
+    # ports:
+    #   - 9000:9000
+    #   - 9443:9443
+    networks:
+      my_network:
+        ipv4_address: 10.0.0.4
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  authentik-worker:
+    container_name: authentik-worker
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION}
+    restart: unless-stopped
+    command: worker
+    # user: ${PUID}:${PGID}
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      # AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__USER: ${USERNAME}
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PASSWORD}
+    volumes:
+      - /run/docker.sock:/run/docker.sock:ro
+      - ${DATADIR}/authentik/media:/media
+      - ${DATADIR}/authentik/custom-templates:/templates
+      - ./certs:/certs:ro
+    networks:
+      my_network:
+        ipv4_address: 10.0.0.5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  homarr:
+    container_name: homarr
+    image: ghcr.io/homarr-labs/homarr:latest # ghcr.io/ajnart/homarr:latest
+    restart: unless-stopped
+    tty: true
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      BASE_URL: ${DOMAIN_NAME}
+      SECRET_ENCRYPTION_KEY: ${ENCRYPTION_KEY} # <--- can be generated with `openssl rand -hex 32`
+      AUTH_PROVIDERS: "oidc,credentials"
+      AUTH_OIDC_CLIENT_ID: ${HOMARR_OAUTH_CLIENT_ID}
+      AUTH_OIDC_CLIENT_SECRET: ${HOMARR_OAUTH_CLIENT_SECRET}
+      AUTH_OIDC_ISSUER: https://authentik.${DOMAIN_NAME}/application/o/homarr/
+      AUTH_OIDC_URI: https://authentik.${DOMAIN_NAME}/application/o/authorize
+      AUTH_OIDC_CLIENT_NAME: authentik
+      AUTH_LOGOUT_REDIRECT_URL: https://authentik.${DOMAIN_NAME}/application/o/homarr/end-session/
+      AUTH_SESSION_EXPIRY_TIME: "1d"
+      OAUTH_ALLOW_DANGEROUS_EMAIL_ACCOUNT_LINKING: true
+      AUTH_OIDC_AUTO_LOGIN: false
+      GOOGLE_REDIRECT_URI: https://${DOMAIN_NAME}/oauth/google/callback
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Optional, only if you want docker integration
+      - $DATADIR/homarr/data:/appdata:rw
+    # ports:
+    #   - 7575:7575
+    networks:
+      my_network:
+        ipv4_address: 10.0.0.6
+
+  ddns_client:
+    container_name: ddns_client
+    image: ghcr.io/mouradost/ddns_client:latest
+    command: "./ddns_client /data/config.yaml --demon"
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    volumes:
+      - ${DATADIR}/ddns_client:/data:ro
