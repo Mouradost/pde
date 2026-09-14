@@ -1,0 +1,145 @@
+#####################################################################################
+#                                        DB                                         #
+#####################################################################################
+networks:
+  pde_network:
+    external: true
+
+services:
+#####################################################################################
+#                                     Engine                                        #
+#####################################################################################
+  postgres:
+    container_name: postgres
+    image: postgres:latest
+    restart: unless-stopped
+    tty: true
+    # user: ${PUID}:${PGID} # Need to be root
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      POSTGRES_USER: ${USERNAME}
+      POSTGRES_PASSWORD: ${PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ${DATADIR}/postgres:/var/lib/postgresql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -h localhost -U ${USERNAME} -d ${POSTGRES_DB}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # ports:
+    #   - 12000:5432
+    networks:
+      my_network:
+        ipv4_address: 10.0.2.1
+
+  qdrant:
+    container_name: qdrant
+    # image: qdrant/qdrant:latest
+    image: qdrant/qdrant:gpu-nvidia-latest
+    restart: unless-stopped
+    tty: true
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      QDRANT__SERVICE__API_KEY: ${SECRET_KEY}
+      QDRANT__GPU__INDEXING: 1
+    volumes:
+      - $DATADIR/qdrant/storage:/qdrant/storage
+      - $DATADIR/qdrant/config:/qdrant/config
+      # - ./certs:/qdrant/tls:ro
+    # ports:
+    #   - 12010:6333
+    #   - 12011:6334
+    networks:
+      my_network:
+        ipv4_address: 10.0.2.2
+    healthcheck:
+      test: ["CMD-SHELL", "./qdrant --version"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  redis:
+    container_name: redis
+    image: redis:latest
+    restart: unless-stopped
+    command: --save 60 1 --loglevel warning
+    # user: ${ROOT_PUID}:${ROOT_PGID} # Need to be root
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+    volumes:
+      - ${DATADIR}/redis:/data:rw
+    networks:
+      my_network:
+        ipv4_address: 10.0.2.4
+
+  surrealdb:
+    image: surrealdb/surrealdb:latest
+    container_name: surrealdb
+    command: start --user ${USERNAME} --pass ${PASSWORD} --bind 0.0.0.0:8000 rocksdb:/data --allow-experimental files #chmod -R 777 /data
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      SURREAL_BUCKET_FOLDER_ALLOWLIST: "/data"
+      SURREAL_MCP_ALLOW_ALL_HOSTS: true
+    volumes:
+      - ${DATADIR}/surrealdb:/data:rw
+    # ports:
+    #   - 12040:8000
+    #   - 12041:443
+    networks:
+      my_network:
+        ipv4_address: 10.0.2.5
+
+#####################################################################################
+#                                   Management                                      #
+#####################################################################################
+
+  pgadmin:
+    container_name: pgadmin
+    image: dpage/pgadmin4:latest
+    restart: unless-stopped
+    # user: ${PUID}:${PGID} # Makes it fail because it runs on 5050 (pgadmin user)
+    # privileged: true
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      PGADMIN_DEFAULT_EMAIL: ${EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PASSWORD}
+      PGADMIN_LISTEN_ADDRESS: 0.0.0.0
+      PGADMIN_CONFIG_ALLOWED_LLM_API_URLS: "http://10.0.1.1"
+      PGADMIN_CONFIG_OLLAMA_API_URL: "http://10.0.1.1:11434"
+    volumes:
+      - ${DATADIR}/pgadmin:/var/lib/pgadmin:rw # needs to be 775 (sudo chmod 775 pgadmin)
+    # ports:
+    #   - 12050:80
+    networks:
+      my_network:
+        ipv4_address: 10.0.2.6
