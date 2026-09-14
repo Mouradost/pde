@@ -1,0 +1,100 @@
+#####################################################################################
+#                                   Monitoring                                      #
+#####################################################################################
+networks:
+  pde_network:
+    external: true
+
+services:
+#####################################################################################
+#                                     Engine                                        #
+#####################################################################################
+  # Exporte metrics
+  cadvisor:
+    container_name: cadvisor
+    image: gcr.io/cadvisor/cadvisor:latest
+    restart: unless-stopped
+    privileged: true
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    # ports:
+    #   - 14030:8080
+    volumes:
+      - /:/rootfs:ro
+      - /run:/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    networks:
+      my_network:
+        ipv4_address: 10.0.4.1
+
+  node-exporter:
+    container_name: node-exporter
+    image: prom/node-exporter:latest
+    restart: unless-stopped
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.rootfs=/rootfs"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    # ports:
+    #   - 14000:9100
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      my_network:
+        ipv4_address: 10.0.4.2
+
+  # Aggregator
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    # ports:
+    #   - 14010:9090
+    volumes:
+      - ${DATADIR}/prometheus:/etc/prometheus:rw
+    networks:
+      my_network:
+        ipv4_address: 10.0.4.3
+
+  # Dashboard
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    # ports:
+    #   - 14020:3000
+    volumes:
+      - ${DATADIR}/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:rw
+      - ${DATADIR}/grafana:/var/lib/grafana:rw
+    networks:
+      my_network:
+        ipv4_address: 10.0.4.4
