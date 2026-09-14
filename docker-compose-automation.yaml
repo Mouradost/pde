@@ -1,0 +1,152 @@
+#####################################################################################
+#                                       IoT                                         #
+#####################################################################################
+networks:
+  pde_network:
+    external: true
+
+services:
+#####################################################################################
+#                                     Engine                                        #
+#####################################################################################
+  # Messaging server
+  mqtt:
+    container_name: mqtt
+    image: eclipse-mosquitto:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    # ports:
+    #   - 13000:1883 #default mqtt port
+    #   - 13001:9001 #default mqtt port for websockets
+    volumes:
+      - ${DATADIR}/mqtt:/mosquitto:rw
+      - ${DATADIR}/mqtt/config:/mosquitto/config:rw
+      - ${DATADIR}/mqtt/data:/mosquitto/data:rw
+      - ${DATADIR}/mqtt/log:/mosquitto/log:rw
+    networks:
+      my_network:
+        ipv4_address: 10.0.3.1
+
+  # Zigbee server
+  zigbee2mqtt:
+    container_name: zigbee2mqtt
+    image: koenkk/zigbee2mqtt:latest
+    restart: unless-stopped
+    # privileged: true
+    # user: $PUID:$PGID
+    group_add:
+      - dialout
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    # ports:
+    #   - 13010:8080 # Frontend port
+    volumes:
+      - ${DATADIR}/zigbee2mqtt/data:/app/data:rw
+      - /run/udev:/run/udev:ro
+      - /dev:/dev:ro
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0 # optional
+      # - /dev:/dev # optional
+    networks:
+      my_network:
+        ipv4_address: 10.0.3.2
+
+  # Domotique
+  homeassistant:
+    container_name: homeassistant
+    image: lscr.io/linuxserver/homeassistant:latest
+    restart: unless-stopped
+    privileged: true
+    group_add:
+      - dialout
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    # ports:
+    #   - 13020:8123 #optional
+    volumes:
+      - ${DATADIR}/homeassistant/data:/config:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /dev:/dev:ro
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0 #optiona
+    # - /dev:/dev #optiona
+    networks:
+      my_network:
+        ipv4_address: 10.0.3.3
+
+  # Custom frimware
+  esphome:
+    container_name: esphome
+    image: ghcr.io/esphome/esphome
+    restart: unless-stopped
+    privileged: true
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      USERNAME: ${USERNAME}
+      PASSWORD: ${PASSWORD}
+    volumes:
+      - ${DATADIR}/esphome:/config
+      - /etc/localtime:/etc/localtime:ro
+    # ports:
+    #   - 13030:6052
+    # network_mode: host
+    networks:
+      my_network:
+        ipv4_address: 10.0.3.4
+
+  frigate:
+    container_name: frigate
+    image: ghcr.io/blakeblackshear/frigate:stable
+    # privileged: true # this may not be necessary for all setups
+    shm_size: "512mb" # update for your cameras based on calculation above
+    cap_add:
+      - CAP_PERFMON
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      FRIGATE_RTSP_PASSWORD: ${PASSWORD}
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128 # For intel hwaccel, needs to be updated for your hardware
+      - /dev/bus/usb:/dev/bus/usb # Passes the USB Coral, needs to be modified for other versions
+      # - /dev/apex_0:/dev/apex_0 # Passes a PCIe Coral, follow driver instructions here https://coral.ai/docs/m2/get-started/#2a-on-linux
+      # - /dev/video11:/dev/video11 # For Raspberry Pi 4B
+    volumes:
+      - ${DATADIR}/frigate/config:/config:rw
+      - ${DATADIR}/frigate/media:/media/frigate:rw
+      # - /etc/localtime:/etc/localtime:ro
+      - type: tmpfs # Optional: 1GB of memory, reduces SSD/SD Card wear
+        target: /tmp/cache
+        tmpfs:
+          size: 1000000000
+    # ports:
+    #   - 13040:8971
+    #   - 13041:5000 # Internal unauthenticated access. Expose carefully.
+    #   - 13042:1984 # go2rtc api
+    #   - 13043:443 # go2rtc api https
+    #   - 13044:8554 # RTSP feeds
+    #   - 13045:8555/tcp # WebRTC over tcp
+    #   - 13046:8555/udp # WebRTC over udp
+    restart: unless-stopped
+    networks:
+      my_network:
+        ipv4_address: 10.0.3.5
