@@ -1,0 +1,384 @@
+#####################################################################################
+#                                        AI                                         #
+#####################################################################################
+networks:
+  pde_network:
+    external: true
+
+services:
+#####################################################################################
+#                                     Engine                                        #
+#####################################################################################
+  ollama:
+    container_name: ollama
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    tty: true
+    # user: ${PUID}:${PGID} # Need to be root
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE}
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH}
+      OLLAMA_FLASH_ATTENTION: ${OLLAMA_FLASH_ATTENTION}
+      OLLAMA_KV_CACHE_TYPE: ${OLLAMA_KV_CACHE_TYPE}
+    volumes:
+      - $DATADIR/ollama:/root/.ollama
+    # ports:
+    #   - 11000:11434
+    networks:
+      my_network:
+        ipv4_address: 10.0.1.1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  omniroute:
+    container_name: omniroute
+    image: diegosouzapw/omniroute:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      JWT_SECRET: ${JWT_SECRET}
+    # ports:
+    #   - 11010:20128
+    volumes:
+      - ${DATADIR}/omniroute:/app/data:rw
+    networks:
+      my_network:
+        ipv4_address: 10.0.1.2
+
+  unsloth:
+    container_name: unsloth
+    image: unsloth/unsloth:latest
+    restart: unless-stopped
+    tty: true
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      UNSLOTH_STUDIO_PASSWORD: ${PASSWORD}
+      JUPYTER_PASSWORD: ${PASSWORD}
+      HF_TOKEN: ${HF_TOKEN}
+      UNSLOTH_STUDIO_ALLOW_STDIO_MCP: 1
+    volumes:
+      - ${DATADIR}/unsloth:/workspace/host
+      - ${HOME}/.cache/huggingface:/workspace/.cache/huggingface
+    # ports:
+    #   - 11020:8888   # Unsloth Studio
+    #   - 11021:8000   # Jupyter Notebook
+    #   - 11022:22     # SSH
+    networks:
+      my_network:
+        ipv4_address: 10.0.1.3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+#####################################################################################
+#                                     Harnesses                                     #
+#####################################################################################
+
+  open-webui:
+    container_name: open-webui
+    image: ghcr.io/open-webui/open-webui:latest-cuda
+    restart: unless-stopped
+    tty: true
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      OLLAMA_BASE_URLS: http://10.0.1.1:11434 #comma separated ollama hosts
+      WHISPER_MODEL_AUTO_UPDATE: true
+      ENV: dev # prod, dev
+      WEBUI_AUTH: true
+      WEBUI_NAME: Lablack AI
+      WEBUI_URL: http://chat.${DOMAIN_NAME}
+      WEBUI_SECRET_KEY: ${SECRET_KEY}
+      ENABLE_OAUTH_SIGNUP: true
+      OAUTH_MERGE_ACCOUNTS_BY_EMAIL: true
+      OAUTH_PROVIDER_NAME: authentik
+      OPENID_PROVIDER_URL: https://authentik.${DOMAIN_NAME}/application/o/open-webui/.well-known/openid-configuration
+      OAUTH_CLIENT_ID: ${OPENWEBUI_OAUTH_CLIENT_ID}
+      OAUTH_CLIENT_SECRET: ${OPENWEBUI_OAUTH_CLIENT_SECRET}
+      OAUTH_SCOPES: "openid email profile"
+      OPENID_REDIRECT_URI: https://chat.${DOMAIN_NAME}/oauth/oidc/callback
+      # Vector Database
+      VECTOR_DB: qdrant
+      QDRANT_API_KEY: ${SECRET_KEY}
+      QDRANT_URI: http://10.0.2.4:${QDRANT_PORT:-6333}
+    volumes:
+      - $DATADIR/open-webui:/app/backend/data:rw
+    # ports:
+    #   - 11030:8080
+    networks:
+      my_network:
+        ipv4_address: 10.0.1.4
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  dsh:
+    container_name: dsh
+    image: smanx/deepseek-harness:devtools-latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      OPENAI_API_KEY: NOT-NEEDED
+    # ports:
+    #   - 11040:3080
+    volumes:
+      - ${DATADIR}/dsh/.dsh:/root/.dsh:rw
+      - ${DATADIR}/dsh/workspaces:/root/workspaces:rw
+    networks:
+      my_network:
+        ipv4_address: 10.0.1.5
+
+
+#####################################################################################
+#                                     Workflow                                      #
+#####################################################################################
+
+  n8n:
+    container_name: n8n
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    tty: true
+    # user: ${PUID_ROOT}:${PGID_ROOT}
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_USER: ${USERNAME}
+      DB_POSTGRESDB_PASSWORD: ${PASSWORD}
+      N8N_DIAGNOSTICS_ENABLED: true
+      N8N_PERSONALIZATION_ENABLED: true
+      N8N_ENCRYPTION_KEY: ${SECRET_KEY}
+      N8N_USER_MANAGEMENT_JWT_SECRET: ${JWT_SECRET}
+      N8N_BLOCK_FILE_ACCESS_TO_N8N_FILES: false
+      N8N_UNVERIFIED_PACKAGES_ENABLED: true
+      # N8N_RESTRICT_FILE_ACCESS_TO: /root
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: true
+      N8N_HOST: n8n.${DOMAIN_NAME}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: https
+      NODE_ENV: production
+      N8N_WEBHOOK_URL: https://n8n.${DOMAIN_NAME}/
+      GENERIC_TIMEZONE: ${TZ}
+      N8N_TRUST_PROXY: true
+      N8N_PROXY_HOPS: 1
+    group_add:
+      - 101
+    volumes:
+      - $DATADIR/n8n:/home/node/.n8n:rw
+      - ${DATADIR}/telegram:/home/node/.n8n-files/var/lib/telegram-bot-api:ro
+    # ports:
+    #   - 11050:5678
+    networks:
+      my_network:
+        ipv4_address: 10.0.1.6
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  comfyui:
+    container_name: comfyui
+    image: yanwk/comfyui-boot:cu130-slim-v2
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    # user: ${PUID}:${PGID} # Need to be root
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      COMFYUI_PATH: /root/ComfyUI
+      COMFYUI_MODEL_PATH: /root/ComfyUI/models
+      CIVITAI_TOKEN: ${CIVITAI_TOKEN}
+      HF_TOKEN: ${HF_TOKEN}
+      CLI_ARGS: "--lowvram --fast --preview-method none --cache-none"
+    volumes:
+      - ${DATADIR}/comfyui/.cache:/root/.cache:rw
+      - ${DATADIR}/comfyui/.config:/root/.config:rw
+      - ${DATADIR}/comfyui/.local:/root/.local:rw
+      - ${DATADIR}/comfyui/models:/root/ComfyUI/models:rw
+      - ${DATADIR}/comfyui/custom_nodes:/root/ComfyUI/custom_nodes:rw
+      - ${DATADIR}/comfyui/input:/root/ComfyUI/input:rw
+      - ${DATADIR}/comfyui/output:/root/ComfyUI/output:rw
+      - ${DATADIR}/comfyui/user:/root/ComfyUI/user:rw
+      - ${DATADIR}/comfyui/scripts:/root/ComfyUI/scripts:rw
+    devices:
+      - /dev/dri:/dev/dri
+    # ports:
+    #   - 11060:8188
+    networks:
+      my_network:
+        ipv4_address: 10.0.1.7
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+#####################################################################################
+#                                        Tools                                      #
+#####################################################################################
+
+  docling:
+    container_name: docling
+    image: quay.io/docling-project/docling-serve:latest
+    restart: unless-stopped
+    # user: ${PUID}:${PGID}
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      DOCLING_SERVE_ENABLE_UI: true
+      DOCLING_SERVE_ENABLE_REMOTE_SERVICES: true
+    # ports:
+    #     - 11070:5001
+    networks:
+      my_network:
+        ipv4_address: 10.0.1.8
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                  - gpu
+
+  searxng:
+    image: searxng/searxng
+    container_name: searxng
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    volumes:
+      - ${DATADIR}/searxng/config:/etc/searxng/:rw
+      - ${DATADIR}/searxng/data:/var/cache/searxng:rw
+    # ports:
+    #   - 11080:8080
+    networks:
+      my_network:
+        ipv4_address: 10.0.1.9
+
+  open-terminal:
+    container_name: open-terminal
+    image: ghcr.io/open-webui/open-terminal
+    restart: unless-stopped
+    tty: true
+    # user: ${PUID}:${PGID} # Need to be root
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      OPEN_TERMINAL_API_KEY: ${API_KEY}
+      OPEN_TERMINAL_MULTI_USER: false
+      # OPEN_TERMINAL_PACKAGES:
+      # OPEN_TERMINAL_PIP_PACKAGES:
+      # OPEN_TERMINAL_NPM_PACKAGES:
+    volumes:
+      # - /var/run/docker.sock:/var/run/docker.sock
+      - $DATADIR/open_terminal:/home/user:rw
+      - ${DATADIR}/open_terminal/.config/open-terminal/config.toml:/etc/open-terminal/config.toml:rw
+    # ports:
+    #   - 11090:8000
+    networks:
+      my_network:
+        ipv4_address: 10.0.1.10
+
+#####################################################################################
+#                                  ASR/TTS (Audio)                                  #
+#####################################################################################
+
+  audio_cpp:
+    container_name: audio_cpp
+    image: ghcr.io/0xshug0/audio.cpp:full-cuda13
+    restart: unless-stopped
+    command: "server --ui --ui-management --host 0.0.0.0 --port 8080 --config /app/server.json"
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      NVIDIA_VISIBLE_DEVICES: all
+    volumes:
+      - ${DATADIR}/audio_cpp/models:/app/models:rw
+      - ${DATADIR}/audio_cpp/server.json:/app/server.json:rw # can be :ro if we want to expose only few models
+    # ports:
+    #   - 11091:8080
+    networks:
+      my_network:
+        ipv4_address: 10.0.1.11
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://10.0.0.23:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                  - gpu
+
+  kokoro:
+    container_name: kokoro
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:latest
+    restart: unless-stopped
+    # user: ${PUID}:${PGID}
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    # ports:
+    #     - 11092:8880
+    networks:
+      my_network:
+        ipv4_address: 10.0.1.11
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu

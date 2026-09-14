@@ -31,7 +31,7 @@ services:
     ports:
       - 80:80
       - 443:443
-      # - 8000:8080
+      # - 10000:8080
     networks:
       my_network:
         ipv4_address: 10.0.0.2
@@ -53,8 +53,8 @@ services:
       - 53:53/tcp
       - 53:53/udp
       # - "67:67/udp" # Only required if you are using Pi-hole as your DHCP server
-      # - 13002:80/tcp
-      # - 13003:443/tcp
+      # - 10010:80/tcp
+      # - 10011:443/tcp
     volumes:
       - ${DATADIR}/pihole:/etc/pihole:rw
       - ${DATADIR}/pihole/dnsmasq.d:/etc/dnsmasq.d:rw
@@ -85,8 +85,8 @@ services:
       - ${DATADIR}/authentik/media:/media
       - ${DATADIR}/authentik/custom-templates:/templates
     # ports:
-    #   - 9000:9000
-    #   - 9443:9443
+    #   - 10020:9000
+    #   - 10021:9443
     networks:
       my_network:
         ipv4_address: 10.0.0.4
@@ -155,7 +155,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro # Optional, only if you want docker integration
       - $DATADIR/homarr/data:/appdata:rw
     # ports:
-    #   - 7575:7575
+    #   - 10030:7575
     networks:
       my_network:
         ipv4_address: 10.0.0.6
