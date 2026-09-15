@@ -1,0 +1,197 @@
+#####################################################################################
+#                                   Multimedia                                      #
+#####################################################################################
+networks:
+  pde_network:
+    external: true
+
+services:
+#####################################################################################
+#                                     Engine                                        #
+#####################################################################################
+  # Local netflix equivalent
+  jellyfin:
+    container_name: jellyfin
+    image: jellyfin/jellyfin:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    volumes:
+      - ${DATADIR}/jellyfin/cache:/cache:rw
+      - ${DATADIR}/jellyfin/config:/config:rw
+      - ${DATADIR}/media:/media:rw
+    # ports:
+    #   - 15000:8098
+    #   - 15001:8096
+    #   - 15002:8920 # Requires valid certificates.
+    healthcheck:
+      url: http://10.0.5.1:8096/health
+      interval: 1m30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    devices:
+      - /dev/dri:/dev/dri # for hardware transcoding
+    networks:
+      my_network:
+        ipv4_address: 10.0.5.1
+
+  # Movies/Series descoverer
+  jellyseerr:
+    container_name: jellyseerr
+    image: fallenbagel/jellyseerr:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PORT: 15010 #optional
+    # ports:
+    #   - 15010:15010
+    volumes:
+      - ${DATADIR}/jellyseerr:/app/config
+    networks:
+      my_network:
+        ipv4_address: 10.0.5.2
+
+  # Movies requester
+  radarr:
+    container_name: radarr
+    image: lscr.io/linuxserver/radarr:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    # ports:
+    #   - 15020:7878
+    volumes:
+      - ${DATADIR}/radarr:/config:rw
+      - ${DATADIR}:/data:rw
+      - ${DATADIR}/media/movies:/movies:rw #optiona
+      - ${DATADIR}/downloads:/downloads:rw #optional
+    networks:
+      my_network:
+        ipv4_address: 10.0.5.3
+
+  # Series requester
+  sonarr:
+    container_name: sonarr
+    image: lscr.io/linuxserver/sonarr:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    # ports:
+    #   - 15030:8989
+    volumes:
+      - ${DATADIR}/sonarr:/config:rw
+      - ${DATADIR}:/data:rw
+      - ${DATADIR}/media/tv:/tv:rw #optional
+      - ${DATADIR}/downloads:/downloads:rw #optional
+    networks:
+      my_network:
+        ipv4_address: 10.0.5.4
+
+  # Music requester
+  lidarr:
+    container_name: lidarr
+    image: lscr.io/linuxserver/lidarr:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    # ports:
+    #   - 15040:8686
+    volumes:
+      - ${DATADIR}/lidarr:/config:rw
+      - ${DATADIR}:/data:rw
+      - ${DATADIR}/media/music:/music:rw #optional
+      - ${DATADIR}/downloads:/downloads:rw #optional
+    networks:
+      my_network:
+        ipv4_address: 10.0.5.5
+
+  # Requesters aggregator
+  prowlarr:
+    container_name: prowlarr
+    image: lscr.io/linuxserver/prowlarr:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      AUTO_UPDATE: true #optional
+      RUN_OPTS: true #optional
+    # ports:
+    #   - 15050:9696
+    volumes:
+      - ${DATADIR}/prowlarr/data:/config
+    networks:
+      my_network:
+        ipv4_address: 10.0.5.6
+
+  # Solve robot challenge
+  flaresolverr:
+    container_name: flaresolverr
+    # DockerHub mirror flaresolverr/flaresolverr:latest
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      AUTO_UPDATE: true #optional
+      RUN_OPTS: true #optional
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_HTML: ${LOG_HTML:-false}
+      CAPTCHA_SOLVER: ${CAPTCHA_SOLVER:-none}
+    # ports:
+    #   - 15060:8191
+    networks:
+      my_network:
+        ipv4_address: 10.0.5.7
+
+  # Torrent client
+  qbittorrent:
+    container_name: qbittorrent
+    image: lscr.io/linuxserver/qbittorrent:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      WEBUI_PORT: 15050
+      WEBUI_HostHeaderValidation: false
+    # ports:
+    #   - 15070:15050
+    #   - 15071:6881
+    #   - 15072:6881/udp
+    volumes:
+      - ${DATADIR}/qbittorrent:/config:rw
+      - ${DATADIR}:/data
+      - ${DATADIR}/downloads:/downloads:rw
+    networks:
+      my_network:
+        ipv4_address: 10.0.5.8
